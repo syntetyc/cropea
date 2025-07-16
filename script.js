@@ -24,6 +24,27 @@ class ImageCropper {
         this.undoBtn = document.getElementById('undoBtn');
         this.clearBtn = document.getElementById('clearBtn');
         
+        // Drawing tool elements
+        this.drawingTools = document.getElementById('drawingTools');
+        this.freeDrawBtn = document.getElementById('freeDrawBtn');
+        this.straightLineBtn = document.getElementById('straightLineBtn');
+        this.drawingOptions = document.getElementById('drawingOptions');
+        this.penSizeBtns = document.querySelectorAll('.pen-size-btn');
+        this.colorBtns = document.querySelectorAll('.color-btn');
+        this.eraseAllBtn = document.getElementById('eraseAllBtn');
+        this.closeDrawingBtn = document.getElementById('closeDrawingBtn');
+        
+        // Drawing state
+        this.isDrawing = false;
+        this.drawingMode = null; // 'free' or 'straight'
+        this.currentPenSize = 2;
+        this.currentColor = '#000000';
+        this.drawingCanvas = null;
+        this.drawingCtx = null;
+        this.startPoint = null;
+        this.previewCanvas = null;
+        this.previewCtx = null;
+        
         // Aspect ratio presets with resolutions
         this.presets = {
             '16/9': [
@@ -82,6 +103,10 @@ class ImageCropper {
         // Ratio selection buttons
         this.ratioButtons.forEach(btn => {
             btn.addEventListener('click', () => {
+                // Don't allow action if button is inactive
+                if (btn.classList.contains('inactive')) {
+                    return;
+                }
                 this.setActiveRatio(btn.dataset.ratio);
                 this.updateActiveButton(btn);
                 this.updateFormatHint();
@@ -90,6 +115,11 @@ class ImageCropper {
         
         // Mobile ratio selector
         this.mobileRatioSelect.addEventListener('change', () => {
+            // Don't allow action if no image is loaded
+            if (!this.imgElement) {
+                this.mobileRatioSelect.value = '';
+                return;
+            }
             this.setActiveRatio(this.mobileRatioSelect.value);
             this.updateFormatHint();
         });
@@ -126,6 +156,28 @@ class ImageCropper {
         this.downloadBtn.addEventListener('click', () => this.downloadImage());
         this.undoBtn.addEventListener('click', () => this.undoChanges());
         this.clearBtn.addEventListener('click', () => this.clearAll());
+        
+        // Drawing tool events
+        this.freeDrawBtn.addEventListener('click', () => this.toggleDrawingMode('free'));
+        this.straightLineBtn.addEventListener('click', () => this.toggleDrawingMode('straight'));
+        this.closeDrawingBtn.addEventListener('click', () => this.closeDrawingMode());
+        this.eraseAllBtn.addEventListener('click', () => this.eraseAllDrawings());
+        
+        // Pen size selection
+        this.penSizeBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                this.currentPenSize = parseInt(btn.dataset.size);
+                this.updatePenSizeButtons(btn);
+            });
+        });
+        
+        // Color selection
+        this.colorBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                this.currentColor = btn.dataset.color;
+                this.updateColorButtons(btn);
+            });
+        });
         
         // Drop area click
         this.dropArea.addEventListener('click', () => {
@@ -178,19 +230,79 @@ class ImageCropper {
         this.dropArea.innerHTML = '';
         
         this.imgElement = document.createElement('img');
-        this.imgElement.src = URL.createObjectURL(file);
         this.imgElement.style.maxWidth = '100%';
         this.imgElement.style.maxHeight = '100%';
         
+        // Initialize cropper and drawing canvas only after image loads
+        this.imgElement.onload = () => {
+            // Create drawing canvas overlay
+            this.createDrawingCanvas();
+            
+            // Initialize cropper
+            this.initCropper();
+            
+            // Ensure drawing canvas is properly sized
+            this.resizeDrawingCanvas();
+        };
+        
+        this.imgElement.src = URL.createObjectURL(file);
         this.dropArea.appendChild(this.imgElement);
         
-        // Initialize cropper
-        this.initCropper();
+        // Update UI state for loaded image
+        this.showImageLoadedState();
+    }
+    
+    /**
+     * Show UI state when image is loaded
+     */
+    showImageLoadedState() {
+        // Show buttons that are available when image is loaded
+        this.undoBtn.style.display = 'inline-flex';
+        this.clearBtn.style.display = 'inline-flex';
         
-        // Reset UI state
+        // Activate crop button
+        this.cropBtn.classList.remove('inactive');
+        this.cropBtn.disabled = false;
+        
+        // Activate sidebar buttons
+        this.activateSidebarButtons();
+        
+        // Hide download button until crop is done
         this.downloadBtn.style.display = 'none';
+        
+        // Reset other UI elements
         this.presetSelect.style.display = 'none';
         this.formatSelector.style.display = 'none';
+        this.drawingTools.style.display = 'none';
+        this.drawingOptions.style.display = 'none';
+    }
+    
+    /**
+     * Activate sidebar buttons when image is loaded
+     */
+    activateSidebarButtons() {
+        this.ratioButtons.forEach(btn => {
+            btn.classList.remove('inactive');
+        });
+        
+        // Enable mobile selector
+        this.mobileRatioSelect.disabled = false;
+        this.mobileRatioSelect.style.opacity = '1';
+    }
+    
+    /**
+     * Deactivate sidebar buttons when no image
+     */
+    deactivateSidebarButtons() {
+        this.ratioButtons.forEach(btn => {
+            btn.classList.add('inactive');
+            btn.classList.remove('active');
+        });
+        
+        // Disable mobile selector
+        this.mobileRatioSelect.disabled = true;
+        this.mobileRatioSelect.style.opacity = '0.6';
+        this.mobileRatioSelect.value = '';
     }
     
     /**
@@ -214,6 +326,288 @@ class ImageCropper {
                 this.updateDimensions(Math.round(width), Math.round(height));
             }
         });
+    }
+    
+    /**
+     * Create drawing canvas overlay
+     */
+    createDrawingCanvas() {
+        this.drawingCanvas = document.createElement('canvas');
+        this.drawingCanvas.style.position = 'absolute';
+        this.drawingCanvas.style.top = '0';
+        this.drawingCanvas.style.left = '0';
+        this.drawingCanvas.style.pointerEvents = 'none';
+        this.drawingCanvas.style.zIndex = '1000';
+        
+        // Create preview canvas for straight lines
+        this.previewCanvas = document.createElement('canvas');
+        this.previewCanvas.style.position = 'absolute';
+        this.previewCanvas.style.top = '0';
+        this.previewCanvas.style.left = '0';
+        this.previewCanvas.style.pointerEvents = 'none';
+        this.previewCanvas.style.zIndex = '1001';
+        
+        this.dropArea.style.position = 'relative';
+        this.dropArea.appendChild(this.drawingCanvas);
+        this.dropArea.appendChild(this.previewCanvas);
+        
+        this.drawingCtx = this.drawingCanvas.getContext('2d');
+        this.previewCtx = this.previewCanvas.getContext('2d');
+        
+        // Resize canvas to match image
+        this.resizeDrawingCanvas();
+        
+        // Add drawing event listeners
+        this.setupDrawingEvents();
+    }
+    
+    /**
+     * Resize drawing canvas to match the image
+     */
+    resizeDrawingCanvas() {
+        if (!this.drawingCanvas || !this.previewCanvas || !this.imgElement) return;
+        
+        const rect = this.imgElement.getBoundingClientRect();
+        const containerRect = this.dropArea.getBoundingClientRect();
+        
+        // Resize drawing canvas
+        this.drawingCanvas.width = rect.width;
+        this.drawingCanvas.height = rect.height;
+        this.drawingCanvas.style.width = rect.width + 'px';
+        this.drawingCanvas.style.height = rect.height + 'px';
+        this.drawingCanvas.style.left = (rect.left - containerRect.left) + 'px';
+        this.drawingCanvas.style.top = (rect.top - containerRect.top) + 'px';
+        
+        // Resize preview canvas
+        this.previewCanvas.width = rect.width;
+        this.previewCanvas.height = rect.height;
+        this.previewCanvas.style.width = rect.width + 'px';
+        this.previewCanvas.style.height = rect.height + 'px';
+        this.previewCanvas.style.left = (rect.left - containerRect.left) + 'px';
+        this.previewCanvas.style.top = (rect.top - containerRect.top) + 'px';
+    }
+    
+    /**
+     * Setup drawing event listeners
+     */
+    setupDrawingEvents() {
+        if (!this.drawingCanvas) return;
+        
+        // Use the drop area for mouse events since drawing canvas has pointer-events: none by default
+        this.dropArea.addEventListener('mousedown', (e) => {
+            if (this.drawingMode) {
+                this.startDrawing(e);
+            }
+        });
+        this.dropArea.addEventListener('mousemove', (e) => {
+            if (this.drawingMode) {
+                this.draw(e);
+            }
+        });
+        this.dropArea.addEventListener('mouseup', () => {
+            if (this.drawingMode) {
+                this.stopDrawing();
+            }
+        });
+        this.dropArea.addEventListener('mouseleave', () => {
+            if (this.drawingMode) {
+                this.stopDrawing();
+            }
+        });
+        
+        // Touch events for mobile
+        this.dropArea.addEventListener('touchstart', (e) => {
+            if (this.drawingMode) {
+                e.preventDefault();
+                const touch = e.touches[0];
+                const mouseEvent = new MouseEvent('mousedown', {
+                    clientX: touch.clientX,
+                    clientY: touch.clientY
+                });
+                this.dropArea.dispatchEvent(mouseEvent);
+            }
+        });
+        
+        this.dropArea.addEventListener('touchmove', (e) => {
+            if (this.drawingMode) {
+                e.preventDefault();
+                const touch = e.touches[0];
+                const mouseEvent = new MouseEvent('mousemove', {
+                    clientX: touch.clientX,
+                    clientY: touch.clientY
+                });
+                this.dropArea.dispatchEvent(mouseEvent);
+            }
+        });
+        
+        this.dropArea.addEventListener('touchend', (e) => {
+            if (this.drawingMode) {
+                e.preventDefault();
+                const mouseEvent = new MouseEvent('mouseup', {});
+                this.dropArea.dispatchEvent(mouseEvent);
+            }
+        });
+    }
+    
+    /**
+     * Toggle drawing mode
+     */
+    toggleDrawingMode(mode) {
+        if (this.drawingMode === mode) {
+            this.closeDrawingMode();
+            return;
+        }
+        
+        this.drawingMode = mode;
+        this.drawingOptions.style.display = 'block';
+        
+        // Enable drawing by changing cursor and preventing default drop area behavior
+        this.dropArea.style.cursor = 'crosshair';
+        
+        // Update button states
+        this.freeDrawBtn.classList.toggle('active', mode === 'free');
+        this.straightLineBtn.classList.toggle('active', mode === 'straight');
+        
+        // Disable cropper when drawing
+        if (this.cropper) {
+            this.cropper.disable();
+        }
+    }
+    
+    /**
+     * Close drawing mode
+     */
+    closeDrawingMode() {
+        this.drawingMode = null;
+        this.drawingOptions.style.display = 'none';
+        
+        // Reset cursor
+        this.dropArea.style.cursor = this.imgElement ? 'default' : 'pointer';
+        
+        // Update button states
+        this.freeDrawBtn.classList.remove('active');
+        this.straightLineBtn.classList.remove('active');
+        
+        // Re-enable cropper
+        if (this.cropper) {
+            this.cropper.enable();
+        }
+    }
+    
+    /**
+     * Start drawing
+     */
+    startDrawing(e) {
+        if (!this.drawingMode) return;
+        
+        // Prevent default behavior
+        e.preventDefault();
+        e.stopPropagation();
+        
+        this.isDrawing = true;
+        const rect = this.dropArea.getBoundingClientRect();
+        const canvasRect = this.drawingCanvas.getBoundingClientRect();
+        
+        this.startPoint = {
+            x: e.clientX - canvasRect.left,
+            y: e.clientY - canvasRect.top
+        };
+        
+        this.drawingCtx.strokeStyle = this.currentColor;
+        this.drawingCtx.lineWidth = this.currentPenSize;
+        this.drawingCtx.lineCap = 'round';
+        this.drawingCtx.lineJoin = 'round';
+        
+        if (this.drawingMode === 'free') {
+            this.drawingCtx.beginPath();
+            this.drawingCtx.moveTo(this.startPoint.x, this.startPoint.y);
+        }
+    }
+    
+    /**
+     * Draw function
+     */
+    draw(e) {
+        if (!this.isDrawing || !this.drawingMode) return;
+        
+        e.preventDefault();
+        e.stopPropagation();
+        
+        const canvasRect = this.drawingCanvas.getBoundingClientRect();
+        const currentPoint = {
+            x: e.clientX - canvasRect.left,
+            y: e.clientY - canvasRect.top
+        };
+        
+        if (this.drawingMode === 'free') {
+            this.drawingCtx.lineTo(currentPoint.x, currentPoint.y);
+            this.drawingCtx.stroke();
+        } else if (this.drawingMode === 'straight') {
+            // Clear preview canvas and draw preview line
+            this.previewCtx.clearRect(0, 0, this.previewCanvas.width, this.previewCanvas.height);
+            this.previewCtx.strokeStyle = this.currentColor;
+            this.previewCtx.lineWidth = this.currentPenSize;
+            this.previewCtx.lineCap = 'round';
+            this.previewCtx.lineJoin = 'round';
+            this.previewCtx.beginPath();
+            this.previewCtx.moveTo(this.startPoint.x, this.startPoint.y);
+            this.previewCtx.lineTo(currentPoint.x, currentPoint.y);
+            this.previewCtx.stroke();
+            
+            this.lastMousePos = currentPoint;
+        }
+    }
+    
+    /**
+     * Stop drawing
+     */
+    stopDrawing() {
+        if (!this.isDrawing || !this.drawingMode) return;
+        
+        if (this.drawingMode === 'straight' && this.startPoint) {
+            if (this.lastMousePos) {
+                // Draw the final line on the main drawing canvas
+                this.drawingCtx.beginPath();
+                this.drawingCtx.moveTo(this.startPoint.x, this.startPoint.y);
+                this.drawingCtx.lineTo(this.lastMousePos.x, this.lastMousePos.y);
+                this.drawingCtx.stroke();
+                
+                // Clear the preview canvas
+                this.previewCtx.clearRect(0, 0, this.previewCanvas.width, this.previewCanvas.height);
+            }
+        }
+        
+        this.isDrawing = false;
+        this.startPoint = null;
+        this.lastMousePos = null;
+    }
+    
+    /**
+     * Update pen size button states
+     */
+    updatePenSizeButtons(activeBtn) {
+        this.penSizeBtns.forEach(btn => btn.classList.remove('active'));
+        activeBtn.classList.add('active');
+    }
+    
+    /**
+     * Update color button states
+     */
+    updateColorButtons(activeBtn) {
+        this.colorBtns.forEach(btn => btn.classList.remove('active'));
+        activeBtn.classList.add('active');
+    }
+    
+    /**
+     * Erase all drawings
+     */
+    eraseAllDrawings() {
+        if (this.drawingCtx) {
+            this.drawingCtx.clearRect(0, 0, this.drawingCanvas.width, this.drawingCanvas.height);
+        }
+        if (this.previewCtx) {
+            this.previewCtx.clearRect(0, 0, this.previewCanvas.width, this.previewCanvas.height);
+        }
     }
     
     /**
@@ -296,7 +690,7 @@ class ImageCropper {
      * @param {number} height - Height in pixels
      */
     updateDimensions(width, height) {
-        this.dimensionsBar.textContent = `${width} x ${height} px`;
+        this.dimensionsBar.innerHTML = `Tamaño del Cropeo: <span class="dimensions-numbers">${width} x ${height} px</span>`;
     }
     
     /**
@@ -337,7 +731,9 @@ class ImageCropper {
         
         if (isCircular && format === 'png') {
             this.formatHint.textContent = 'PNG mantendrá el fondo transparente';
-        } else if (isCircular && format !== 'png') {
+        } else if (isCircular && format === 'gif') {
+            this.formatHint.textContent = 'GIF mantendrá el fondo transparente al cropeo circular';
+        } else if (isCircular && (format === 'jpg' || format === 'webp')) {
             this.formatHint.textContent = 'Se añadirá fondo blanco al recorte circular';
         } else {
             this.formatHint.textContent = '';
@@ -399,6 +795,85 @@ class ImageCropper {
     }
     
     /**
+     * Download the cropped image with drawings merged
+     */
+    downloadImage() {
+        if (!this.lastCanvas) return;
+        
+        let finalCanvas = this.lastCanvas;
+        
+        // If there are drawings on the current image, merge them
+        if (this.drawingCanvas && this.hasDrawings()) {
+            finalCanvas = this.mergeCurrentDrawings(this.lastCanvas);
+        }
+        
+        const format = this.getSelectedFormat();
+        const mimeType = this.getMimeType(format);
+        const extension = this.getFileExtension(format);
+        
+        // Get quality parameter for lossy formats
+        const quality = (format === 'jpg' || format === 'webp') ? 0.9 : undefined;
+        
+        const link = document.createElement('a');
+        link.href = finalCanvas.toDataURL(mimeType, quality);
+        
+        const dimensions = this.dimensionsBar.textContent
+            .replace(/ px/g, '')
+            .replace(' x ', 'x');
+        link.download = `cropea-${dimensions}px.${extension}`;
+        
+        link.click();
+    }
+    
+    /**
+     * Check if there are any drawings on the canvas
+     */
+    hasDrawings() {
+        if (!this.drawingCanvas) return false;
+        
+        const ctx = this.drawingCanvas.getContext('2d');
+        const imageData = ctx.getImageData(0, 0, this.drawingCanvas.width, this.drawingCanvas.height);
+        
+        // Check if any pixel has been modified (not transparent)
+        for (let i = 3; i < imageData.data.length; i += 4) {
+            if (imageData.data[i] !== 0) return true;
+        }
+        return false;
+    }
+    
+    /**
+     * Merge current drawings with the image canvas
+     */
+    mergeCurrentDrawings(imageCanvas) {
+        if (!this.drawingCanvas) return imageCanvas;
+        
+        // Create a new canvas for the merged result
+        const mergedCanvas = document.createElement('canvas');
+        mergedCanvas.width = imageCanvas.width;
+        mergedCanvas.height = imageCanvas.height;
+        const mergedCtx = mergedCanvas.getContext('2d');
+        
+        // Draw the image first
+        mergedCtx.drawImage(imageCanvas, 0, 0);
+        
+        // Get the current image element dimensions
+        const imgRect = this.imgElement.getBoundingClientRect();
+        const containerRect = this.dropArea.getBoundingClientRect();
+        
+        // Calculate scale factors between drawing canvas and final image
+        const scaleX = imageCanvas.width / this.drawingCanvas.width;
+        const scaleY = imageCanvas.height / this.drawingCanvas.height;
+        
+        // Draw the drawings on top, scaled appropriately
+        mergedCtx.save();
+        mergedCtx.scale(scaleX, scaleY);
+        mergedCtx.drawImage(this.drawingCanvas, 0, 0);
+        mergedCtx.restore();
+        
+        return mergedCanvas;
+    }
+    
+    /**
      * Create circular canvas from rectangular canvas
      * @param {HTMLCanvasElement} sourceCanvas - Source canvas
      * @returns {HTMLCanvasElement} - Circular canvas
@@ -451,6 +926,12 @@ class ImageCropper {
         this.dropArea.appendChild(img);
         this.imgElement = img;
         
+        // Create new drawing canvas for the cropped image
+        this.imgElement.onload = () => {
+            this.createDrawingCanvas();
+            this.resizeDrawingCanvas();
+        };
+        
         // Destroy cropper after cropping
         this.destroyCropper();
     }
@@ -459,34 +940,15 @@ class ImageCropper {
      * Show download options (button and format selector)
      */
     showDownloadOptions() {
+        // Hide crop button and show download button
+        this.cropBtn.style.display = 'none';
         this.downloadBtn.style.display = 'inline-flex';
+        
+        // Show other download-related options
         this.formatSelector.style.display = 'block';
+        this.drawingTools.style.display = 'flex';
         this.updateRadioButtons();
         this.updateFormatHint();
-    }
-    
-    /**
-     * Download the cropped image
-     */
-    downloadImage() {
-        if (!this.lastCanvas) return;
-        
-        const format = this.getSelectedFormat();
-        const mimeType = this.getMimeType(format);
-        const extension = this.getFileExtension(format);
-        
-        // Get quality parameter for lossy formats
-        const quality = (format === 'jpg' || format === 'webp') ? 0.9 : undefined;
-        
-        const link = document.createElement('a');
-        link.href = this.lastCanvas.toDataURL(mimeType, quality);
-        
-        const dimensions = this.dimensionsBar.textContent
-            .replace(/ px/g, '')
-            .replace(' x ', 'x');
-        link.download = `cropea-${dimensions}px.${extension}`;
-        
-        link.click();
     }
     
     /**
@@ -503,8 +965,11 @@ class ImageCropper {
      */
     clearAll() {
         this.destroyCropper();
+        this.imgElement = null; // Reset image element reference
         this.resetUI();
         this.clearActiveButtons();
+        this.closeDrawingMode();
+        this.eraseAllDrawings();
         
         // Reset format selector to PNG
         const pngRadio = document.querySelector('input[name="imageFormat"][value="png"]');
@@ -518,19 +983,34 @@ class ImageCropper {
      * Show error state
      */
     showError() {
-        this.dropArea.innerHTML = '<div class="placeholder"><i class="material-icons" style="font-size:48px; color:#F97251">dangerous</i></div>';
-        this.updateDimensions(0, 0);
+        this.dropArea.innerHTML = '<div class="placeholder"><i class="material-symbols-outlined" style="font-size:48px; color:#F97251">dangerous</i></div>';
+        this.dimensionsBar.innerHTML = 'Tamaño del Cropeo: <span class="dimensions-numbers">0 x 0 px</span>';
     }
     
     /**
      * Reset UI to initial state
      */
     resetUI() {
-        this.dropArea.innerHTML = '<div class="placeholder"><i class="material-icons">add_photo_alternate</i></div>';
-        this.updateDimensions(0, 0);
+        this.dropArea.innerHTML = '<div class="placeholder"><i class="material-symbols-outlined">add_photo_alternate</i></div>';
+        this.dropArea.style.cursor = 'pointer'; // Ensure cursor is pointer for clickable state
+        this.dimensionsBar.innerHTML = 'Tamaño del Cropeo: <span class="dimensions-numbers">0 x 0 px</span>';
+        
+        // Hide some buttons initially, but show crop button as inactive
+        this.undoBtn.style.display = 'none';
+        this.clearBtn.style.display = 'none';
+        this.cropBtn.style.display = 'inline-flex';
+        this.cropBtn.classList.add('inactive');
+        this.cropBtn.disabled = true;
         this.downloadBtn.style.display = 'none';
+        
+        // Deactivate sidebar buttons
+        this.deactivateSidebarButtons();
+        
+        // Hide other UI elements
         this.presetSelect.style.display = 'none';
         this.formatSelector.style.display = 'none';
+        this.drawingTools.style.display = 'none';
+        this.drawingOptions.style.display = 'none';
         this.formatHint.textContent = '';
     }
     
@@ -549,6 +1029,10 @@ class ImageCropper {
         if (this.cropper) {
             this.cropper.destroy();
             this.cropper = null;
+    
+    // Deactivate sidebar buttons after crop
+    this.deactivateSidebarButtons();
+    
         }
     }
 }
