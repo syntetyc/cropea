@@ -817,10 +817,10 @@ class ImageCropper {
         const link = document.createElement('a');
         link.href = finalCanvas.toDataURL(mimeType, quality);
         
-        const dimensions = this.dimensionsBar.textContent
-            .replace(/ px/g, '')
-            .replace(' x ', 'x');
-        link.download = `cropea-${dimensions}px.${extension}`;
+        // Extract dimensions from the dimensions bar
+        const dimensionsText = this.dimensionsBar.querySelector('.dimensions-numbers').textContent;
+        const dimensions = dimensionsText.replace(' px', '').replace(' x ', 'x');
+        link.download = `cropea-${dimensions}.${extension}`;
         
         link.click();
     }
