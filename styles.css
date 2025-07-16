@@ -67,7 +67,7 @@ body {
 
 .sidebar button.inactive:hover {
   border-color: transparent;
-  color: #ccc;
+  color: #999;
 }
 .sidebar button.active {
   background: var(--active-color);
@@ -486,7 +486,7 @@ body {
   border-radius: 30px;
   background: var(--active-color);
   color: #fff;
-  display: none;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
@@ -500,6 +500,16 @@ body {
 
 .crop-btn:hover {
   background: var(--hover-color);
+}
+
+.crop-btn.inactive {
+    background: #ccc;
+    color: #888;
+    cursor: not-allowed;
+}
+
+.crop-btn.inactive i {
+    color: #888;
 }
 
 .crop-btn.inactive:hover {
@@ -569,6 +579,7 @@ select.mobile-selector,
     border-radius: 30px;
     padding: 10px 20px;
     font-size: 14px;
+    opacity: 0.6;
   }
 
   .bottom-bar {
@@ -591,13 +602,4 @@ select.mobile-selector,
     margin: 5px 0;
     justify-content: center;
   }
-}
-.crop-btn.inactive {
-    background: #ccc;
-    color: #888;
-    cursor: not-allowed;
-}
-
-.crop-btn.inactive i {
-    color: #888;
 }

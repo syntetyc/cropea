@@ -944,6 +944,9 @@ class ImageCropper {
         this.cropBtn.style.display = 'none';
         this.downloadBtn.style.display = 'inline-flex';
         
+        // Deactivate sidebar buttons after crop
+        this.deactivateSidebarButtons();
+        
         // Show other download-related options
         this.formatSelector.style.display = 'block';
         this.drawingTools.style.display = 'flex';
@@ -1029,10 +1032,6 @@ class ImageCropper {
         if (this.cropper) {
             this.cropper.destroy();
             this.cropper = null;
-    
-    // Deactivate sidebar buttons after crop
-    this.deactivateSidebarButtons();
-    
         }
     }
 }
