@@ -12,6 +12,7 @@ class ImageCropper {
         
         // DOM elements
         this.dropArea = document.getElementById('dropArea');
+        this.cropInfoContainer = document.getElementById('cropInfoContainer');
         this.ratioButtons = document.querySelectorAll('.sidebar button');
         this.mobileRatioSelect = document.getElementById('mobileRatioSelect');
         this.inputFile = document.getElementById('inputFile');
@@ -260,7 +261,11 @@ class ImageCropper {
         this.undoBtn.style.display = 'inline-flex';
         this.clearBtn.style.display = 'inline-flex';
         
-        // Activate crop button
+        // Show crop info container (dimensions)
+        this.cropInfoContainer.style.display = 'flex';
+        
+        // Show and activate crop button
+        this.cropBtn.style.display = 'inline-flex';
         this.cropBtn.classList.remove('inactive');
         this.cropBtn.disabled = false;
         
@@ -271,10 +276,17 @@ class ImageCropper {
         this.downloadBtn.style.display = 'none';
         
         // Reset other UI elements
-        this.presetSelect.style.display = 'none';
         this.formatSelector.style.display = 'none';
         this.drawingTools.style.display = 'none';
         this.drawingOptions.style.display = 'none';
+        
+        // Hide preset selector and remove side-by-side layout
+        const presetBar = document.getElementById('presetBar');
+        if (presetBar) {
+            presetBar.style.display = 'none';
+        }
+        this.presetSelect.style.display = 'none';
+        this.cropInfoContainer.classList.remove('side-by-side');
     }
     
     /**
@@ -326,6 +338,11 @@ class ImageCropper {
                 this.updateDimensions(Math.round(width), Math.round(height));
             }
         });
+        
+        // Ensure crop button is visible and active when cropper is initialized
+        this.cropBtn.style.display = 'inline-flex';
+        this.cropBtn.classList.remove('inactive');
+        this.cropBtn.disabled = false;
     }
     
     /**
@@ -630,9 +647,6 @@ class ImageCropper {
             this.cropper.setAspectRatio(aspectRatio);
             this.dropArea.classList.remove('circle');
         }
-        
-        // Update preset options
-        this.updatePresetOptions(ratio);
     }
     
     /**
@@ -656,31 +670,65 @@ class ImageCropper {
     }
     
     /**
-     * Update preset options based on selected ratio
-     * @param {string} ratio - The selected ratio
+     * Update preset options based on current crop dimensions
      */
-    updatePresetOptions(ratio) {
-        const options = this.presets[ratio] || [];
+    updatePresetOptions() {
+        if (!this.lastCanvas) return;
+        
+        const cropWidth = this.lastCanvas.width;
+        const cropHeight = this.lastCanvas.height;
+        const cropRatio = cropWidth / cropHeight;
+        
+        // Determine which preset category fits best
+        let bestRatio = 'free';
+        let minDifference = Infinity;
+        
+        // Check against known ratios
+        const ratios = {
+            '16/9': 16/9,
+            '9/16': 9/16,
+            '1': 1
+        };
+        
+        for (const [ratioKey, ratioValue] of Object.entries(ratios)) {
+            const difference = Math.abs(cropRatio - ratioValue);
+            if (difference < minDifference && difference < 0.1) { // tolerance of 0.1
+                minDifference = difference;
+                bestRatio = ratioKey;
+            }
+        }
+        
+        // Check for circular (square with tolerance)
+        if (Math.abs(cropRatio - 1) < 0.05) {
+            bestRatio = 'circle';
+        }
+        
+        const options = this.presets[bestRatio] || [];
         
         if (options.length > 0) {
             this.presetSelect.innerHTML = '<option value="">Seleccione resolución</option>' +
+                `<option value="${cropWidth}x${cropHeight}">Original (${cropWidth}x${cropHeight})</option>` +
                 options.map(([name, width, height]) => 
                     `<option value="${width}x${height}">${name}</option>`
                 ).join('');
             this.presetSelect.style.display = 'block';
         } else {
-            this.presetSelect.style.display = 'none';
+            this.presetSelect.innerHTML = '<option value="">Selecciona resolución de descarga</option>' +
+                `<option value="${cropWidth}x${cropHeight}">Original (${cropWidth}x${cropHeight})</option>`;
+            this.presetSelect.style.display = 'block';
         }
+        
+        // Keep placeholder selected (empty value)
+        this.presetSelect.value = '';
     }
     
     /**
-     * Apply preset dimensions to the cropper
+     * Apply preset dimensions for download
      */
     applyPresetDimensions() {
-        if (!this.cropper || !this.presetSelect.value) return;
+        if (!this.lastCanvas || !this.presetSelect.value) return;
         
         const [width, height] = this.presetSelect.value.split('x').map(Number);
-        this.cropper.setData({ width, height });
         this.updateDimensions(width, height);
     }
     
@@ -778,12 +826,6 @@ class ImageCropper {
         
         let canvas = this.cropper.getCroppedCanvas();
         
-        // Apply preset dimensions if selected
-        if (this.presetSelect.value) {
-            const [width, height] = this.presetSelect.value.split('x').map(Number);
-            canvas = this.cropper.getCroppedCanvas({ width, height });
-        }
-        
         // Handle circular cropping
         if (this.dropArea.classList.contains('circle')) {
             canvas = this.createCircularCanvas(canvas);
@@ -792,6 +834,12 @@ class ImageCropper {
         this.lastCanvas = canvas;
         this.displayCroppedImage(canvas);
         this.showDownloadOptions();
+        
+        // Update preset options based on cropped dimensions
+        this.updatePresetOptions();
+        
+        // Update dimensions display with original crop size
+        this.updateDimensions(canvas.width, canvas.height);
     }
     
     /**
@@ -800,11 +848,35 @@ class ImageCropper {
     downloadImage() {
         if (!this.lastCanvas) return;
         
+        // Get selected dimensions
+        const selectedDimensions = this.presetSelect.value;
         let finalCanvas = this.lastCanvas;
+        
+        // Resize if different dimensions selected
+        if (selectedDimensions && selectedDimensions !== `${this.lastCanvas.width}x${this.lastCanvas.height}`) {
+            const [targetWidth, targetHeight] = selectedDimensions.split('x').map(Number);
+            
+            // Create resized canvas
+            const resizedCanvas = document.createElement('canvas');
+            resizedCanvas.width = targetWidth;
+            resizedCanvas.height = targetHeight;
+            const resizedCtx = resizedCanvas.getContext('2d');
+            
+            // Handle circular cropping background for non-PNG formats
+            const format = this.getSelectedFormat();
+            if (this.dropArea.classList.contains('circle') && format !== 'png') {
+                resizedCtx.fillStyle = '#ffffff';
+                resizedCtx.fillRect(0, 0, targetWidth, targetHeight);
+            }
+            
+            // Draw resized image
+            resizedCtx.drawImage(this.lastCanvas, 0, 0, targetWidth, targetHeight);
+            finalCanvas = resizedCanvas;
+        }
         
         // If there are drawings on the current image, merge them
         if (this.drawingCanvas && this.hasDrawings()) {
-            finalCanvas = this.mergeCurrentDrawings(this.lastCanvas);
+            finalCanvas = this.mergeCurrentDrawings(finalCanvas);
         }
         
         const format = this.getSelectedFormat();
@@ -817,9 +889,8 @@ class ImageCropper {
         const link = document.createElement('a');
         link.href = finalCanvas.toDataURL(mimeType, quality);
         
-        // Extract dimensions from the dimensions bar
-        const dimensionsText = this.dimensionsBar.querySelector('.dimensions-numbers').textContent;
-        const dimensions = dimensionsText.replace(' px', '').replace(' x ', 'x');
+        // Get final dimensions
+        const dimensions = `${finalCanvas.width}x${finalCanvas.height}`;
         link.download = `cropea-${dimensions}.${extension}`;
         
         link.click();
@@ -844,25 +915,25 @@ class ImageCropper {
     /**
      * Merge current drawings with the image canvas
      */
-    mergeCurrentDrawings(imageCanvas) {
+    mergeCurrentDrawings(targetCanvas) {
         if (!this.drawingCanvas) return imageCanvas;
         
         // Create a new canvas for the merged result
         const mergedCanvas = document.createElement('canvas');
-        mergedCanvas.width = imageCanvas.width;
-        mergedCanvas.height = imageCanvas.height;
+        mergedCanvas.width = targetCanvas.width;
+        mergedCanvas.height = targetCanvas.height;
         const mergedCtx = mergedCanvas.getContext('2d');
         
         // Draw the image first
-        mergedCtx.drawImage(imageCanvas, 0, 0);
+        mergedCtx.drawImage(targetCanvas, 0, 0);
         
         // Get the current image element dimensions
         const imgRect = this.imgElement.getBoundingClientRect();
         const containerRect = this.dropArea.getBoundingClientRect();
         
-        // Calculate scale factors between drawing canvas and final image
-        const scaleX = imageCanvas.width / this.drawingCanvas.width;
-        const scaleY = imageCanvas.height / this.drawingCanvas.height;
+        // Calculate scale factors between drawing canvas and target canvas
+        const scaleX = targetCanvas.width / this.drawingCanvas.width;
+        const scaleY = targetCanvas.height / this.drawingCanvas.height;
         
         // Draw the drawings on top, scaled appropriately
         mergedCtx.save();
@@ -947,7 +1018,15 @@ class ImageCropper {
         // Deactivate sidebar buttons after crop
         this.deactivateSidebarButtons();
         
-        // Show other download-related options
+        // Add side-by-side class to crop info container
+        this.cropInfoContainer.classList.add('side-by-side');
+        
+        // Show download-related options
+        const presetBar = document.getElementById('presetBar');
+        if (presetBar) {
+            presetBar.style.display = 'flex';
+        }
+        this.presetSelect.style.display = 'block';
         this.formatSelector.style.display = 'block';
         this.drawingTools.style.display = 'flex';
         this.updateRadioButtons();
@@ -959,6 +1038,10 @@ class ImageCropper {
      */
     undoChanges() {
         if (this.originalFile) {
+            // Clear any existing UI state
+            this.destroyCropper();
+            
+            // Reload the image which will trigger showImageLoadedState()
             this.loadImage(this.originalFile);
         }
     }
@@ -973,6 +1056,9 @@ class ImageCropper {
         this.clearActiveButtons();
         this.closeDrawingMode();
         this.eraseAllDrawings();
+        
+        // Remove side-by-side class
+        this.cropInfoContainer.classList.remove('side-by-side');
         
         // Reset format selector to PNG
         const pngRadio = document.querySelector('input[name="imageFormat"][value="png"]');
@@ -996,6 +1082,9 @@ class ImageCropper {
     resetUI() {
         this.dropArea.innerHTML = '<div class="placeholder"><i class="material-symbols-outlined">add_photo_alternate</i></div>';
         this.dropArea.style.cursor = 'pointer'; // Ensure cursor is pointer for clickable state
+        
+        // Hide crop info container until image is loaded
+        this.cropInfoContainer.style.display = 'none';
         this.dimensionsBar.innerHTML = 'Tamaño del Cropeo: <span class="dimensions-numbers">0 x 0 px</span>';
         
         // Hide some buttons initially, but show crop button as inactive
@@ -1010,11 +1099,18 @@ class ImageCropper {
         this.deactivateSidebarButtons();
         
         // Hide other UI elements
+        const presetBar = document.getElementById('presetBar');
+        if (presetBar) {
+            presetBar.style.display = 'none';
+        }
         this.presetSelect.style.display = 'none';
         this.formatSelector.style.display = 'none';
         this.drawingTools.style.display = 'none';
         this.drawingOptions.style.display = 'none';
         this.formatHint.textContent = '';
+        
+        // Remove side-by-side class
+        this.cropInfoContainer.classList.remove('side-by-side');
     }
     
     /**
