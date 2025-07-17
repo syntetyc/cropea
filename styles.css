@@ -411,6 +411,16 @@ body {
   margin-bottom: 8px;
 }
 
+.format-dropdown {
+  display: none;
+  width: 100%;
+  background: white !important;
+  border: none;
+  border-radius: 15px;
+  padding: 10px 15px;
+  font-size: 14px;
+  margin-bottom: 8px;
+}
 .format-option {
   display: flex;
   align-items: center;
@@ -584,17 +594,27 @@ body {
 /* Select styling */
 select,
 select.mobile-selector,
-.preset-bar select {
+.preset-bar select,
+.format-dropdown {
   -webkit-appearance: none !important;
   -moz-appearance: none !important;
   appearance: none !important;
-  background-color: #F1F1F1 !important;
   background-image: url("data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='%23333' viewBox='0 0 24 24'%3E%3Cpath d='M7 10l5 5 5-5z'/%3E%3C/svg%3E") !important;
   background-repeat: no-repeat !important;
   background-position: right 15px center !important;
   background-size: 24px !important;
   padding-right: 45px !important;
   border-radius: 30px !important;
+}
+
+select,
+select.mobile-selector,
+.preset-bar select {
+  background-color: #F1F1F1 !important;
+}
+
+.format-dropdown {
+  background-color: white !important;
 }
 
 /* Mobile responsive */
@@ -620,6 +640,44 @@ select.mobile-selector,
     opacity: 0.6;
   }
 
+  /* Format selector responsive */
+  .format-options {
+    display: none;
+  }
+  
+  .format-dropdown {
+    display: block;
+    background: white !important;
+  }
+  
+  /* Drawing controls vertical layout on mobile */
+  .drawing-controls-horizontal {
+    flex-direction: column;
+    gap: 15px;
+    align-items: center;
+  }
+  
+  .drawing-group {
+    width: 100%;
+    max-width: 300px;
+  }
+  
+  .group-title {
+    margin-bottom: 10px;
+    font-size: 14px;
+  }
+  
+  .pen-sizes {
+    justify-content: center;
+  }
+  
+  .color-palette {
+    justify-content: center;
+  }
+  
+  .erase-actions {
+    justify-content: center;
+  }
   .bottom-bar {
     flex-direction: column;
     align-items: stretch;
@@ -637,8 +695,13 @@ select.mobile-selector,
     flex-direction: column;
   }
   
-  .crop-info-container .dimensions-bar,
-  .crop-info-container .preset-bar {
+  .crop-info-container.side-by-side {
+    flex-direction: column;
+  }
+  
+  .crop-info-container.side-by-side .dimensions-bar,
+  .crop-info-container.side-by-side .preset-bar {
+    width: 100%;
     margin-bottom: 5px;
   }
 

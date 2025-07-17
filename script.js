@@ -20,6 +20,7 @@ class ImageCropper {
         this.presetSelect = document.getElementById('presetSelect');
         this.formatSelector = document.getElementById('formatSelector');
         this.formatHint = document.getElementById('formatHint');
+        this.formatDropdown = document.getElementById('formatDropdown');
         this.cropBtn = document.getElementById('cropBtn');
         this.downloadBtn = document.getElementById('downloadBtn');
         this.undoBtn = document.getElementById('undoBtn');
@@ -139,6 +140,18 @@ class ImageCropper {
             });
         });
         
+        // Format dropdown for mobile
+        this.formatDropdown.addEventListener('change', () => {
+            // Sync dropdown with radio buttons
+            const selectedValue = this.formatDropdown.value;
+            const correspondingRadio = document.querySelector(`input[name="imageFormat"][value="${selectedValue}"]`);
+            if (correspondingRadio) {
+                correspondingRadio.checked = true;
+                this.updateRadioButtons();
+                this.updateFormatHint();
+            }
+        });
+        
         // Format option labels (for clicking on the label)
         const formatOptions = document.querySelectorAll('.format-option');
         formatOptions.forEach(option => {
@@ -146,6 +159,8 @@ class ImageCropper {
                 const radio = option.querySelector('input[type="radio"]');
                 if (radio) {
                     radio.checked = true;
+                    // Sync radio buttons with dropdown
+                    this.formatDropdown.value = radio.value;
                     this.updateRadioButtons();
                     this.updateFormatHint();
                 }
@@ -1065,6 +1080,7 @@ class ImageCropper {
         if (pngRadio) {
             pngRadio.checked = true;
         }
+        this.formatDropdown.value = 'png';
         this.updateRadioButtons();
     }
     
